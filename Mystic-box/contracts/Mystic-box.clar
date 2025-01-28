@@ -4,6 +4,8 @@
 (define-constant ERR-INVALID-RARITY (err u2))
 (define-constant ERR-INSUFFICIENT-FUNDS (err u3))
 (define-constant ERR-NO-REWARDS (err u4))
+(define-constant ERR-INVALID-REWARD (err u5))
+(define-constant MAX-REWARD-VALUE u1000000000) ;; Set a maximum reward value for safety
 
 ;; NFT Definition
 (define-non-fungible-token mystic-box uint)
@@ -41,16 +43,21 @@
   )
 )
 
-(define-private (get-rarity (roll uint))
-  (if (<= roll u5) 
-    "legendary"
-    (if (<= roll u15) 
-      "rare"
-      (if (<= roll u40) 
-        "uncommon"
-        "common"
-      )
-    )
+(define-private (is-valid-rarity (rarity (string-ascii 20)))
+  (is-some (map-get? rarity-probabilities {rarity: rarity}))
+)
+
+(define-private (is-valid-reward (reward uint))
+  (and 
+    (> reward u0)
+    (<= reward MAX-REWARD-VALUE)
+  )
+)
+
+(define-private (validate-and-update-rewards (current-rewards (list 100 uint)) (new-reward uint))
+  (begin
+    (asserts! (is-valid-reward new-reward) ERR-INVALID-REWARD)
+    (ok (unwrap! (as-max-len? (append current-rewards new-reward) u100) ERR-INVALID-RARITY))
   )
 )
 
@@ -60,14 +67,17 @@
   (reward uint))
   (begin
     (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-UNAUTHORIZED)
+    (asserts! (is-valid-rarity rarity) ERR-INVALID-RARITY)
+    (asserts! (is-valid-reward reward) ERR-INVALID-REWARD)
+    
     (match (map-get? rewards-pool {rarity: rarity})
       existing-rewards
         (let 
           (
             (current-rewards (get rewards existing-rewards))
-            (updated-rewards (unwrap! (as-max-len? (append current-rewards reward) u100) ERR-INVALID-RARITY))
+            (validated-rewards (try! (validate-and-update-rewards current-rewards reward)))
           )
-          (ok (map-set rewards-pool {rarity: rarity} {rewards: updated-rewards})))
+          (ok (map-set rewards-pool {rarity: rarity} {rewards: validated-rewards})))
       (ok (map-set rewards-pool {rarity: rarity} {rewards: (list reward)}))
     )
   )
@@ -117,6 +127,19 @@
             )
           )
         ERR-INVALID-RARITY
+      )
+    )
+  )
+)
+
+(define-private (get-rarity (roll uint))
+  (if (<= roll u5) 
+    "legendary"
+    (if (<= roll u15) 
+      "rare"
+      (if (<= roll u40) 
+        "uncommon"
+        "common"
       )
     )
   )
