@@ -1,80 +1,94 @@
-# Mystic Box Smart Contract
-
-A Clarity smart contract for a blockchain-based mystery box (gacha) system that allows users to mint NFT boxes and open them to receive rewards of varying rarities.
+# Mystic Box NFT Smart Contract
 
 ## Overview
+The Mystic Box NFT Smart Contract implements a gamified NFT system where users can mint and open mystery boxes to receive rewards. Each box has a chance to contain items of different rarities (common, uncommon, rare, or legendary) with associated probabilities and rewards.
 
-The Mystic Box smart contract implements a mystery box system where users can:
-- Mint NFT boxes
-- Open boxes to receive rewards
-- Each box has a chance to contain rewards of different rarities: common, uncommon, rare, and legendary
-- Contract owner can manage the rewards pool for each rarity level
+## Features
+- NFT minting and burning mechanics
+- Rarity-based reward system
+- User statistics tracking
+- Global leaderboard functionality
+- Randomized reward distribution
+- Owner-controlled reward pool management
 
-## Rarity Distribution
+## Core Components
 
-The contract implements the following rarity probabilities:
-- Legendary: 5%
-- Rare: 10%
-- Uncommon: 25%
+### Rarity System
+The contract implements four rarity tiers with the following probabilities:
 - Common: 60%
+- Uncommon: 25%
+- Rare: 10%
+- Legendary: 5%
 
-## Functions
+### Data Structures
+- `rarity-probabilities`: Maps rarity levels to their probabilities
+- `rewards-pool`: Stores available rewards for each rarity level
+- `user-stats`: Tracks individual user statistics
+- `leaderboard-map`: Maintains global leaderboard rankings
 
-### Public Functions
+## Public Functions
 
-#### `mint-mystic-box()`
-Mints a new Mystic Box NFT to the caller's address.
-- Returns: uint (box ID)
-- Requires: None
+### For Users
+1. `mint-mystic-box()`
+   - Mints a new Mystic Box NFT
+   - Returns the unique box ID
 
-#### `open-mystic-box(box-id: uint)`
-Opens a Mystic Box and returns a reward based on random rarity.
-- Parameters:
-  - `box-id`: The ID of the box to open
-- Returns: Object containing rarity and reward value
-- Requires: Caller must be the owner of the box
+2. `open-mystic-box(box-id: uint)`
+   - Opens a Mystic Box and reveals its contents
+   - Burns the NFT
+   - Updates user statistics
+   - Returns the rarity and reward
 
-#### `add-reward-to-pool(rarity: string-ascii, reward: uint)`
-Adds a new reward to the specified rarity pool.
-- Parameters:
-  - `rarity`: Rarity level ("common", "uncommon", "rare", "legendary")
-  - `reward`: Reward value (must be > 0 and <= MAX_REWARD_VALUE)
-- Returns: Success/failure response
-- Requires: Caller must be contract owner
+### For Contract Owner
+1. `add-reward-to-pool(rarity: string-ascii, reward: uint)`
+   - Adds new rewards to the specified rarity pool
+   - Only callable by contract owner
+   - Maximum reward value: 1,000,000,000
 
 ### Read-Only Functions
+1. `get-rarity-probability(rarity: string-ascii)`
+   - Returns the probability for a specific rarity
 
-#### `get-rarity-probability(rarity: string-ascii)`
-Returns the probability for the specified rarity level.
-- Parameters:
-  - `rarity`: Rarity level to query
-- Returns: Optional probability value
+2. `get-rewards-by-rarity(rarity: string-ascii)`
+   - Returns available rewards for a specific rarity
 
-#### `get-rewards-by-rarity(rarity: string-ascii)`
-Returns the list of available rewards for the specified rarity level.
-- Parameters:
-  - `rarity`: Rarity level to query
-- Returns: Optional list of rewards
+3. `get-user-stats(user: principal)`
+   - Returns user's statistics:
+     - Boxes opened
+     - Legendary items found
+     - Rare items found
+     - Uncommon items found
+     - Common items found
+     - Total rewards
+
+4. `get-leaderboard-entry(position: uint)`
+   - Returns the user and score at the specified leaderboard position
+
+5. `get-leaderboard-size()`
+   - Returns the current size of the leaderboard
+
+6. `get-user-rank(user: principal)`
+   - Returns the user's current rank on the leaderboard
+
+## Constants
+- Maximum reward value: 1,000,000,000
+- Maximum leaderboard size: 100 entries
 
 ## Error Codes
-
-- `ERR-UNAUTHORIZED (u1)`: Caller is not authorized to perform the action
-- `ERR-INVALID-RARITY (u2)`: Invalid rarity level specified
-- `ERR-INSUFFICIENT-FUNDS (u3)`: Insufficient funds for the operation
-- `ERR-NO-REWARDS (u4)`: No rewards available in the specified pool
-- `ERR-INVALID-REWARD (u5)`: Invalid reward value specified
+- `ERR-UNAUTHORIZED (u1)`: Unauthorized access attempt
+- `ERR-INVALID-RARITY (u2)`: Invalid rarity specification
+- `ERR-INSUFFICIENT-FUNDS (u3)`: Insufficient funds for operation
+- `ERR-NO-REWARDS (u4)`: No rewards available in pool
+- `ERR-INVALID-REWARD (u5)`: Invalid reward value
+- `ERR-UPDATE-FAILED (u6)`: Failed to update user statistics
 
 ## Security Features
-
-- Reward value validation with upper and lower bounds
-- Owner-only access for reward pool management
-- Secure random number generation using block height and nonce
-- Protected NFT operations with ownership verification
-- Maximum list length protection for rewards pool
-- Input validation for all public functions
+- Ownership controls for administrative functions
+- Validation checks for rewards and rarity values
+- Authorization checks for NFT operations
+- Maximum value constraints for rewards
 
 ## Usage Example
-
 ```clarity
 ;; Mint a new Mystic Box
 (contract-call? .mystic-box mint-mystic-box)
@@ -82,31 +96,12 @@ Returns the list of available rewards for the specified rarity level.
 ;; Open a Mystic Box
 (contract-call? .mystic-box open-mystic-box u1)
 
-;; Add reward to pool (contract owner only)
-(contract-call? .mystic-box add-reward-to-pool "legendary" u1000)
+;; Check user stats
+(contract-call? .mystic-box get-user-stats tx-sender)
 ```
 
-## Limitations
-
-- Maximum 100 rewards per rarity pool
-- Maximum reward value is capped at 1,000,000,000
-- Randomness is pseudo-random and based on block height
-- Rarity probabilities are fixed and cannot be modified after deployment
-
-## Development and Testing
-
-To deploy and test this contract:
-
-1. Install Clarinet
-2. Create a new project and add the contract
-3. Run the test suite:
-```bash
-clarinet test
-```
-
-## Security Considerations
-
-- The contract uses block height for randomness, which is predictable
-- Ensure proper access control when deploying
-- Monitor reward pools to ensure sufficient rewards are available
-- Consider gas costs when managing large reward pools
+## Notes
+- The random number generation uses block height and a nonce for entropy
+- The leaderboard is automatically updated when users open boxes
+- Rewards are distributed randomly from the available pool for each rarity level
+- The contract maintains a maximum of 100 entries in the leaderboard
