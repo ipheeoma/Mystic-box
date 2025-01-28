@@ -5,12 +5,14 @@
 (define-constant ERR-INSUFFICIENT-FUNDS (err u3))
 (define-constant ERR-NO-REWARDS (err u4))
 (define-constant ERR-INVALID-REWARD (err u5))
-(define-constant MAX-REWARD-VALUE u1000000000) ;; Set a maximum reward value for safety
+(define-constant ERR-UPDATE-FAILED (err u6))
+(define-constant MAX-REWARD-VALUE u1000000000)
+(define-constant MAX-LEADERBOARD-SIZE u100)
 
 ;; NFT Definition
 (define-non-fungible-token mystic-box uint)
 
-;; Data Maps
+;; Data Maps and Variables
 (define-map rarity-probabilities
   {rarity: (string-ascii 20)}
   {probability: uint}
@@ -20,6 +22,26 @@
   {rarity: (string-ascii 20)}
   {rewards: (list 100 uint)}
 )
+
+;; Leaderboard Data Structures
+(define-map user-stats
+  principal
+  {
+    boxes-opened: uint,
+    legendary-found: uint,
+    rare-found: uint,
+    uncommon-found: uint,
+    common-found: uint,
+    total-rewards: uint
+  }
+)
+
+(define-map leaderboard-map
+  uint  ;; position
+  {user: principal, boxes-opened: uint}
+)
+
+(define-data-var leaderboard-size uint u0)
 
 ;; Data Variables
 (define-data-var randomness-nonce uint u0)
@@ -32,14 +54,9 @@
 
 ;; Helper Functions
 (define-private (generate-random-number)
-  (let 
-    (
-      (nonce (var-get randomness-nonce))
-    )
-    (begin
-      (var-set randomness-nonce (+ nonce u1))
-      (mod (+ burn-block-height nonce) u100)
-    )
+  (begin
+    (var-set randomness-nonce (+ (var-get randomness-nonce) u1))
+    (mod (+ burn-block-height (var-get randomness-nonce)) u100)
   )
 )
 
@@ -61,6 +78,46 @@
   )
 )
 
+;; Leaderboard Helper Functions
+(define-private (update-user-stats (user principal) (rarity (string-ascii 20)) (reward uint))
+  (let
+    (
+      (current-stats (default-to
+        {
+          boxes-opened: u0,
+          legendary-found: u0,
+          rare-found: u0,
+          uncommon-found: u0,
+          common-found: u0,
+          total-rewards: u0
+        }
+        (map-get? user-stats user)))
+      (new-boxes-opened (+ (get boxes-opened current-stats) u1))
+    )
+    (begin
+      (map-set user-stats user
+        (merge current-stats
+          {
+            boxes-opened: new-boxes-opened,
+            total-rewards: (+ (get total-rewards current-stats) reward),
+            legendary-found: (+ (get legendary-found current-stats) (if (is-eq rarity "legendary") u1 u0)),
+            rare-found: (+ (get rare-found current-stats) (if (is-eq rarity "rare") u1 u0)),
+            uncommon-found: (+ (get uncommon-found current-stats) (if (is-eq rarity "uncommon") u1 u0)),
+            common-found: (+ (get common-found current-stats) (if (is-eq rarity "common") u1 u0))
+          }
+        ))
+      (map-set leaderboard-map (var-get leaderboard-size) {user: user, boxes-opened: new-boxes-opened})
+      (if (< (var-get leaderboard-size) MAX-LEADERBOARD-SIZE)
+        (var-set leaderboard-size (+ (var-get leaderboard-size) u1))
+        true
+      )
+      (if (is-some (map-get? user-stats user))
+        (ok true)
+        ERR-UPDATE-FAILED)
+    )
+  )
+)
+
 ;; Public Functions
 (define-public (add-reward-to-pool 
   (rarity (string-ascii 20)) 
@@ -71,13 +128,7 @@
     (asserts! (is-valid-reward reward) ERR-INVALID-REWARD)
     
     (match (map-get? rewards-pool {rarity: rarity})
-      existing-rewards
-        (let 
-          (
-            (current-rewards (get rewards existing-rewards))
-            (validated-rewards (try! (validate-and-update-rewards current-rewards reward)))
-          )
-          (ok (map-set rewards-pool {rarity: rarity} {rewards: validated-rewards})))
+      existing-rewards (ok (map-set rewards-pool {rarity: rarity} {rewards: (unwrap! (validate-and-update-rewards (get rewards existing-rewards) reward) ERR-INVALID-REWARD)}))
       (ok (map-set rewards-pool {rarity: rarity} {rewards: (list reward)}))
     )
   )
@@ -94,11 +145,8 @@
 )
 
 (define-public (open-mystic-box (box-id uint))
-  (let 
-    (
-      (owner (unwrap! (nft-get-owner? mystic-box box-id) ERR-UNAUTHORIZED))
-    )
-    (asserts! (is-eq owner tx-sender) ERR-UNAUTHORIZED)
+  (begin
+    (asserts! (is-eq (unwrap! (nft-get-owner? mystic-box box-id) ERR-UNAUTHORIZED) tx-sender) ERR-UNAUTHORIZED)
     
     (let 
       (
@@ -120,6 +168,7 @@
                 (selected-reward (unwrap! (element-at rewards-list reward-index) ERR-INVALID-RARITY))
               )
               (try! (nft-burn? mystic-box box-id tx-sender))
+              (try! (update-user-stats tx-sender rarity selected-reward))
               (ok {
                 rarity: rarity,
                 reward: selected-reward
@@ -152,4 +201,31 @@
 
 (define-read-only (get-rewards-by-rarity (rarity (string-ascii 20)))
   (map-get? rewards-pool {rarity: rarity})
+)
+
+(define-read-only (get-user-stats (user principal))
+  (map-get? user-stats user)
+)
+
+(define-read-only (get-leaderboard-entry (position uint))
+  (map-get? leaderboard-map position)
+)
+
+(define-read-only (get-leaderboard-size)
+  (var-get leaderboard-size)
+)
+
+(define-read-only (get-user-rank (user principal))
+  (let
+    ((user-boxes (get boxes-opened (default-to {boxes-opened: u0} (map-get? user-stats user)))))
+    (+ u1 (fold rank-calculator
+      (list user-boxes)
+      u0))
+  )
+)
+
+(define-private (rank-calculator (score uint) (acc uint))
+  (if (> score acc)
+    (+ acc u1)
+    acc)
 )
